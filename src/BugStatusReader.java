@@ -19,6 +19,7 @@ import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.ProtocolException;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.Path;
@@ -28,12 +29,12 @@ import java.nio.file.Path;
  */
 public class BugStatusReader {
 
-    static final String USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_1)";
-    static FileSystem defaultFileSystem = FileSystems.getDefault();
-    static TextFileWriter writerFixedIssues;
-    static TextFileWriter writerTestIssues;
-    static int countFixed = 0;
-    static int countTestIssues = 0;
+    private static final String USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_1)";
+    private static FileSystem defaultFileSystem = FileSystems.getDefault();
+    private static TextFileWriter writerFixedIssues;
+    private static TextFileWriter writerTestIssues;
+    private static int countFixed = 0;
+    private static int countTestIssues = 0;
 
     private static void printUsage() {
         String usage =
@@ -79,9 +80,12 @@ public class BugStatusReader {
 
     }
 
-    static String [] getNameAndExtension(Path fileName) {
-        String[] tokens = fileName.toString().split("\\.(?=[^\\.]+$)");
-        return tokens;
+    private static String [] getNameAndExtension(Path fileName) {
+        return fileName.toString().split("\\.(?=[^.]+$)");
+    }
+
+    private static boolean isNumeric(String s) {
+        return s != null && s.matches("[-+]?\\d*\\.?\\d+");
     }
 
     private static void generateNewProblemList(Path resDir, Path path) {
@@ -116,10 +120,20 @@ public class BugStatusReader {
             writerTestIssues.writeln("<tr><td></td><td>Bug</td><td>Description</td><td>Status</td><td>Resolution</td><td>fixVersion</td></tr>");
 
             while ((line = br.readLine()) != null) {
-                if (line.startsWith("# https://bugs.openjdk.java.net/browse/JDK-")) {
-                    String issueKey = getIsssueKey(line);
-                    System.out.println(issueKey);
-                    getStatusOpenJDKIssue(issueKey);
+                // skip empty and commented strings
+                if (!line.isEmpty() && !line.startsWith("#")) {
+                    String[] tokens = line.split("\\s+");
+                    if (tokens.length > 1) {
+                        String[] issueKeys = tokens[1].split(",");
+                        for (String issueKey : issueKeys) {
+                            if (issueKey.startsWith("JRE")) {
+                                //for future
+                            } else if (isNumeric(issueKey)) {
+                                System.out.println("JDK-" + issueKey);
+                                getStatusOpenJDKIssue("JDK-" + issueKey);
+                            }
+                        }
+                    }
                 }
             }
 
@@ -147,7 +161,8 @@ public class BugStatusReader {
         } catch (MalformedURLException e) {
             e.printStackTrace();
         }
-        HttpURLConnection con = null;
+        HttpURLConnection con;
+        assert obj != null;
         con = (HttpURLConnection) obj.openConnection();
 
         // optional default is GET
@@ -165,14 +180,14 @@ public class BugStatusReader {
         BufferedReader in = new BufferedReader(
                 new InputStreamReader(con.getInputStream()));
         String inputLine;
-        StringBuffer response = new StringBuffer();
+        StringBuilder response = new StringBuilder();
 
         while ((inputLine = in.readLine()) != null) {
             response.append(inputLine);
         }
         in.close();
         parseResponse(new ByteArrayInputStream(
-                response.toString().getBytes("UTF-8")));
+                response.toString().getBytes(StandardCharsets.UTF_8)));
     }
 
     private static void parseResponse(ByteArrayInputStream byteArrayInputStream) {
@@ -192,9 +207,9 @@ public class BugStatusReader {
                     String key = getTextContent(eElement, "key");
                     String description = getTextContent(eElement, "summary");
                     String status = getTextContent(eElement, "status");
-                    String status_id = getAttribute(eElement, "status", "id");
+                    String status_id = getAttribute(eElement, "status");
                     String resolution = getTextContent(eElement, "resolution");
-                    String resolution_id = getAttribute(eElement, "resolution", "id");
+                    String resolution_id = getAttribute(eElement, "resolution");
                     String fixVersion = getTextContent(eElement, "fixVersion");
                     int res_id = Integer.decode(resolution_id);
 
@@ -234,9 +249,9 @@ public class BugStatusReader {
         }
     }
 
-    private static String getAttribute(Element eElement, String nodeName, String attributeName) {
+    private static String getAttribute(Element eElement, String nodeName) {
         try {
-            return ((Element) eElement.getElementsByTagName(nodeName).item(0)).getAttribute(attributeName);
+            return ((Element) eElement.getElementsByTagName(nodeName).item(0)).getAttribute("id");
         } catch (NullPointerException e) {
             return "";
         }
@@ -252,16 +267,16 @@ class TextFileWriter {
     private Path path;
     private boolean append_to_file = false;
 
-    public TextFileWriter(Path path) {
+    TextFileWriter(Path path) {
         this.path = path;
     }
 
-    public TextFileWriter(Path path, boolean append_to_file) {
+    TextFileWriter(Path path, boolean append_to_file) {
         this.path = path;
         this.append_to_file = append_to_file;
     }
 
-    public void writeln(String textLine) throws IOException {
+    void writeln(String textLine) throws IOException {
         FileWriter write = new FileWriter(path.toString(), append_to_file);
         PrintWriter printWriter = new PrintWriter(write);
         printWriter.printf("%s" + "%n", textLine);
